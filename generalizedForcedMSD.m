@@ -47,57 +47,33 @@ classdef GeneralizedForcedMSD
         % space and time. c_output is a Nx1 vector of the dampers. C_output
         % is the corresponding NxN damping matrix.
         function [c_output,C_output] = getDamping(obj,t)
-            C = eye(obj.N);
-            c = zeros(obj.N,1);
-            for i = 1:obj.N
-                c(i) = obj.c_static+obj.A_c*sin(i*obj.d*obj.c_wavenumber-obj.c_angularfreq*t); % Damping coefficient of c = 0.1
-            end
+            i = 1:obj.N;
+            c = obj.c_static+obj.A_c*sin(i*obj.d*obj.c_wavenumber-obj.c_angularfreq*t);
 
             % Create damping matrix C (tridiagonal) based on c
-               C(obj.N,obj.N-1) = -c(obj.N-1); % Custom entries for last mass, since EQMS are different
-               C(obj.N,obj.N) = c(obj.N);
+             C = diag(c)+diag([c(2:obj.N),0])+diag(-c(2:obj.N),1)+diag(-c(1:obj.N-1),-1);
 
-             for row = 1:obj.N-1
-                for col = 1:obj.N
-                    if row == col % Diagonal elements
-                        C(row,col) = c(row)+c(row+1);
-                    elseif (row-col==-1) || (row-col==1)% Upper and lower diagonal elements (taking advantage of the fact the k index is tied to the column in both cases)
-                        C(row,col) = -c(col);
-                    end
-                end
-             end
-     
              c_output = c;
              C_output = C;
         end
         
+        % Get stiffness vector k and stiffness matrix K at time t
         function [k_output,K_output] = getStiffness(obj,t)
-            K = eye(obj.N);
+            %K = zeros(obj.N);
             
             % Stiffness vector k specifies initial spring rate at each discrete coordinate
-            k = zeros(obj.N,1);
-            for i = 1:obj.N
-                % k(i) = mod(i-1, 5)+1;
-                k(i) = obj.k_static+obj.A_k*sin(i*obj.d*obj.k_wavenumber-obj.k_angularfreq*t); % Baseline stiffness of 3, space modulation of 0.1 
-            end
+            i = 1:obj.N;
+            k = obj.k_static+obj.A_k*sin((i*obj.d)*obj.k_wavenumber - obj.k_angularfreq*t);
+            
 
             % Create stiffness matrix K (tridiagonal) based on k
-               K(obj.N,obj.N-1) = -k(obj.N-1); % Custom entries for last mass, since EQMS are different
-               K(obj.N,obj.N) = k(obj.N);
-                 for row = 1:obj.N-1
-                    for col = 1:obj.N
-                        if row == col % Diagonal elements
-                            K(row,col) = k(row)+k(row+1);
-                        elseif (row-col==-1) || (row-col==1)% Upper and lower diagonal elements (taking advantage of the fact the k index is tied to the column in both cases)
-                            K(row,col) = -k(col);
-                        end
-                    end
-                 end
+               K = diag(k)+diag([k(2:obj.N),0])+diag(-k(2:obj.N),1)+diag(-k(1:obj.N-1),-1);
 
                K_output = K;
                k_output = k;
         end
         
+        % Custom forcing function
         function f_out = getForcing(obj,t)
             % B not currently used for pulsed function implementation
             disp(t);
@@ -120,6 +96,7 @@ classdef GeneralizedForcedMSD
             f_out = f;
         end
         
+        % State variable equation
         function v=f(obj,t,x)
             % Damping Matrix C 
             [~,C] = obj.getDamping(t);
@@ -130,44 +107,52 @@ classdef GeneralizedForcedMSD
             % Return new state
             A1 = [zeros(obj.N) eye(obj.N); -obj.M\K -obj.M\C];
             %v = A1*x+[zeros(obj.N,1);f]*sin(obj.w_driving*t);
-            f = obj.getForcing(t); 
-            %f = zeros(obj.N,1);
+            %f = obj.getForcing(t); 
+            f = zeros(obj.N,1);
             v = A1*x+[zeros(obj.N,1);f];
         end
         
-        function [E_kinetic_out, E_potential_out, E_total_out] = getTotalEnergy(t,y,k)
-           E_displacement = zeros(length(t),1);
-           E_velocity = zeros(length(t),1);
-
+        % Get energies of the system 
+        function [E_kinetic_out, E_potential_out, E_total_out] = getTotalEnergy(obj,t,y)
+           E_potential = zeros(length(t),1);
+           E_kinetic = zeros(length(t),1);
+            
+           [k,~] = obj.getStiffness(t);
+           
            for i = 1:length(t)
-               x = y(i,1:obj.N)';
-               x_diff = x - [0;x(1:obj.N-1,1)];
+               x = y(i,1:obj.N)'; % Displacements of each mass at time index i
+               x_diff = x - [0;x(1:obj.N-1,1)]; % Find deflection of each spring based on differences of mass coordinates
 
                %test_displacementE = 0.5*K*(y(i,1:N)'.^2);
-               E_displacement(i) = 0.5*sum(diag(k)*x_diff.^2);
+               E_potential(i) = 0.5*sum(k(i,:)*x_diff.^2); % Spring potential energy
 
                %E_displacement(i) = sum(0.5*K*(y(i,1:N)'.^2),'all');  
-               E_velocity(i) = sum(0.5*obj.M*(y(i,obj.N+1:2*obj.N)'.^2),'all');
+               E_kinetic(i) = sum(0.5*obj.M*(y(i,obj.N+1:2*obj.N)'.^2),'all'); % Kinetic energy
            end
 
-           E_kinetic_out = E_displacement;
-           E_potential_out = E_velocity;
-           E_total_out = E_displacement+E_velocity;
+           E_kinetic_out = E_potential;
+           E_potential_out = E_kinetic;
+           E_total_out = E_potential+E_kinetic;
         end
         
         function [T,Y] = integrateStateVar(obj)
-            options = odeset('AbsTol',1e-3,'RelTol',1e-3,'Stats','on');
-            [T,Y] = ode45(@(t,y) f(obj,t,y),obj.ts,obj.y0,options);
+            %options = odeset('RelTol',1.e-4,'Stats','on');
+            options = odeset('Stats','on');
+            %[T,Y] = ode45(@(t,y) f(obj,t,y),obj.ts,obj.y0,options);
+            [T,Y] = ode15s(@(t,y) f(obj,t,y),obj.ts,obj.y0,options);
         end
         
+        % Get the time-displacement data 
         function [T,Y] = getStateVar(obj)
             [T,Y] = deal(obj.t, obj.y);
         end
         
-        
+        % Get the displacement of a particular mass/site
         function [t,y] = getDisplacement(obj,mass_num)
             [t,y] = deal(obj.t, obj.y(:,mass_num));
         end
+        
+        % Get displacement after a windowing function has been applied
         function [t,y_filtered] = getFilteredDisplacement(obj,t_start,t_end,mass_num)
             i = 1;
             while obj.t(i) < t_start

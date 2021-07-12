@@ -34,7 +34,7 @@ V = y(:,N+1:end);   %Velocity data
 
 % Forward propagating wave
 k_wavenumber = 1.5*(2*pi); 
-k_angularfreq = 4*(2*pi);
+k_angularfreq = 10*(2*pi);
 b = GeneralizedForcedMSD(N, d, y0, ts, B, w_driving, M, A_k, k_static, k_wavenumber, k_angularfreq, A_c, c_static, c_wavenumber, c_angularfreq);
 
 [tb,yb] = b.getStateVar();
@@ -42,13 +42,16 @@ Ub = yb(:,1:N);
 Vb = yb(:,N+1:end);
 
 % Backward propagating wave
-k_angularfreq = -k_angularfreq;
+k_angularfreq = -10*(2*pi);
 c = GeneralizedForcedMSD(N, d, y0, ts, B, w_driving, M, A_k, k_static, k_wavenumber, k_angularfreq, A_c, c_static, c_wavenumber, c_angularfreq);
 
 
 [tc,yc] = c.getStateVar();
 Uc = yc(:,1:N);
 Vc = yc(:,N+1:end);
+
+
+
 
 
 %% Plotting
@@ -201,7 +204,7 @@ xlim([-30 0])
 ylim([-300 300])
 xlabel('\mu')
 ylabel('\Omega')
-title("Modulated Backward: " + "w_t=" + c.k_angularfreq + ", w_k=" + c.k_wavenumber);
+title("Modulated Backward: " + "w_t = " c.k_angularfreq );
 
 
 nexttile([1,1])
@@ -220,7 +223,7 @@ xlim([0 30])
 ylim([-300 300])
 xlabel('\mu')
 ylabel('\Omega')
-title('Modulated Forward: ' + "w_t=" + b.k_angularfreq + ", w_k=" + b.k_wavenumber);
+title('Modulated Forward');
 
 
 
