@@ -18,6 +18,8 @@ classdef GeneralizedForcedMSD
         
         t
         y
+        
+
     end
     
     methods
@@ -38,6 +40,7 @@ classdef GeneralizedForcedMSD
             obj.c_static = c_static;
             obj.c_wavenumber = c_wavenumber;
             obj.c_angularfreq = c_angularfreq;
+           
             
             [obj.t,obj.y] = obj.integrateStateVar;
 
@@ -56,6 +59,23 @@ classdef GeneralizedForcedMSD
              c_output = c;
              C_output = C;
         end
+             
+%         function [k_output, K_output] = getStiffnessMultiple(obj,t)
+%             k = zeros(1,obj.N);
+%             i = 1:obj.N;
+%             
+%             for w_t = obj.k_angularfreq_range
+%                 k = k + obj.A_k*sin((i*obj.d)*obj.k_wavenumber - w_t*t);
+%             end    
+%             %k = k/(length(obj.k_angularfreq_range)); % Normalize the amplitude based on how many frequencies summed
+%             
+%             k = k + obj.k_static;
+%             K = diag(k)+diag([k(2:obj.N),0])+diag(-k(2:obj.N),1)+diag(-k(1:obj.N-1),-1);
+% 
+%             k_output = k;
+%             K_output = K;
+%             
+%         end
         
         % Get stiffness vector k and stiffness matrix K at time t
         function [k_output,K_output] = getStiffness(obj,t)
@@ -63,12 +83,18 @@ classdef GeneralizedForcedMSD
             
             % Stiffness vector k specifies initial spring rate at each discrete coordinate
             i = 1:obj.N;
-            k = obj.k_static+obj.A_k*sin((i*obj.d)*obj.k_wavenumber - obj.k_angularfreq*t);
+            k = zeros(1,obj.N);
+            %k = obj.k_static+obj.A_k*(sin((i*obj.d)*obj.k_wavenumber - obj.k_angularfreq*t));
             
+            for w_t = obj.k_angularfreq
+                k = k + obj.A_k*sin((i*obj.d)*obj.k_wavenumber - w_t*t);
+            end   
 
             % Create stiffness matrix K (tridiagonal) based on k
+               k = k + obj.k_static;
                K = diag(k)+diag([k(2:obj.N),0])+diag(-k(2:obj.N),1)+diag(-k(1:obj.N-1),-1);
-
+               
+               
                K_output = K;
                k_output = k;
         end
@@ -102,16 +128,18 @@ classdef GeneralizedForcedMSD
             [~,C] = obj.getDamping(t);
 
             % Stiffness Matrix K
+            %[~,K] = obj.getStiffness(t);
             [~,K] = obj.getStiffness(t);
 
             % Return new state
             A1 = [zeros(obj.N) eye(obj.N); -obj.M\K -obj.M\C];
+
             %v = A1*x+[zeros(obj.N,1);f]*sin(obj.w_driving*t);
             %f = obj.getForcing(t); 
             f = zeros(obj.N,1);
             v = A1*x+[zeros(obj.N,1);f];
         end
-        
+
         % Get energies of the system 
         function [E_kinetic_out, E_potential_out, E_total_out] = getTotalEnergy(obj,t,y)
            E_potential = zeros(length(t),1);
@@ -172,6 +200,24 @@ classdef GeneralizedForcedMSD
             y_filtered = obj.y(:,mass_num).*w;
             
         end
+        
+        % Get the modulation forces across all of the sites at a given time
+        function [F_out] = getModulationForce(obj)
+            
+            F = zeros(length(obj.t),obj.N);
+            
+            for i = 1:length(obj.t)
+                [k,~] = obj.getStiffness(i);
+                x = obj.y(i,1:obj.N)'; % Displacements of each mass at time index i
+                x_diff = (x - [0;x(1:obj.N-1,1)])'; % Find deflection of each spring based on differences of mass coordinates
+                
+                F(i,:) = k(i,:).*x_diff; % Spring forces, set a single row (site forces at given time)
+                
+            end
+            F_out = F;
+       
+        end
+        
     end 
 end
 
