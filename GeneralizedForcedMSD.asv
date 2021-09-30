@@ -46,8 +46,8 @@ classdef GeneralizedForcedMSD
 
         end
         
-        function [k_output] = getDisplacementDependentStiffness(obj,x)
-            k_output = 
+        function [k_output] = getDisplacementDependentStiffness(obj,t)
+            k_output = obj.y
         end
         
         % Determines damping coefficient for each damper as a function of
