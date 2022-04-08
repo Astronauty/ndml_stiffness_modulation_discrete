@@ -8,7 +8,7 @@ classdef GeneralizedForcedMSD
         M % Mass matrix
         w_driving % Driving frequency for forcing matrix
         A_k % Amplitude of space stiffness modulation
-        k_static 
+        k_static
         k_wavenumber % Wavenumber stiffness modulation
         k_angularfreq % Angular freq stiffness modulation
         A_c % Amplitude of space damping modulation
@@ -19,12 +19,15 @@ classdef GeneralizedForcedMSD
         t
         y
         
+        error
+        error_derivative
+        error_integral
 
     end
     
     methods
         % Constructor
-        function obj = GeneralizedForcedMSD(N, d, y0, ts, B, w_driving, M, A_k, k_static, k_wavenumber, k_angularfreq, A_c, c_static, c_wavenumber, c_angularfreq) 
+        function obj = GeneralizedForcedMSD(N, d, y0, ts, B, w_driving, M, A_k, k_static, k_wavenumber, k_angularfreq, A_c, c_static, c_wavenumber, c_angularfreq); 
             obj.N = N;
             obj.d = d;
             obj.y0 = y0;
@@ -41,13 +44,29 @@ classdef GeneralizedForcedMSD
             obj.c_wavenumber = c_wavenumber;
             obj.c_angularfreq = c_angularfreq;
            
+            % PID Terms
+            obj.error = [];
+            obj.error_integral = [];
+            obj.error_derivative = [];
             
             [obj.t,obj.y] = obj.integrateStateVar;
 
         end
         
-        function [k_output] = getDisplacementDependentStiffness(obj,t)
-            k_output = obj.y
+        function [k_output] = getDisplacementDependentStiffness(obj, y)
+            %k_output = exp(500*y)' + obj.k_static;
+            k_output = 2000*y' + obj.k_static;
+        end
+        
+        function [displacement] = getStiffnessDependentDisplacement(obj, k)
+            %k_output = exp(500*y)' + obj.k_static;
+            displacement = [(k - obj.k_static)./2000.0]';
+        end
+        
+        function differential_displacements = getDifferentialDisplacements(obj)
+            displacements = obj.y(:,1:obj.N);
+            [rows, cols] = size(displacements);
+            differential_displacements = displacements - [zeros(rows, 1) displacements(:,1:(cols-1))];
         end
         
         % Determines damping coefficient for each damper as a function of
@@ -64,52 +83,52 @@ classdef GeneralizedForcedMSD
              C_output = C;
         end
              
-        % Get stiffness vector k and stiffness matrix K at time t
-        function [k_output,K_output] = getStiffness(obj,t)
-            %K = zeros(obj.N);
-            
+        function [k_output,K_output] = getDesiredStiffness(obj,y,t)
             % Stiffness vector k specifies initial spring rate at each discrete coordinate
             i = 1:obj.N;
             k = zeros(1,obj.N);
-            %k = obj.k_static+obj.A_k*(sin((i*obj.d)*obj.k_wavenumber - obj.k_angularfreq*t));
-            
+
+            % Add up each of the angular frequency components of modulation
+            % ASSUMES SMALL ENOUGH DISPLACEMENT THAT IT DOESN'T CONTRIBUTE
+            % TO DISPLACEMENT DEPENDENT STIFFNESS CHANGE
             for w_t = obj.k_angularfreq
                 k = k + obj.A_k*sin((i*obj.d)*obj.k_wavenumber - w_t*t);
             end   
-
+            
+            k = k+obj.k_static;
             % Create stiffness matrix K (tridiagonal) based on k
-               k = k + obj.k_static;
                K = diag(k)+diag([k(2:obj.N),0])+diag(-k(2:obj.N),1)+diag(-k(1:obj.N-1),-1);
                
+               K_output = K;
+               k_output = k;
+        end
+
+        % Get stiffness vector k and stiffness matrix K at time t
+        function [k_output,K_output] = getActualStiffness(obj,y,t)
+            % Stiffness vector k specifies initial spring rate at each discrete coordinate
+            i = 1:obj.N;
+            k = zeros(1,obj.N);
+
+            % Add up each of the angular frequency components of modulation
+            for w_t = obj.k_angularfreq
+                k = k + obj.A_k*sin((i*obj.d)*obj.k_wavenumber - w_t*t);
+            end   
+            
+            k = k + obj.getDisplacementDependentStiffness(y(1:obj.N)); % Add the baseline stiffness
+            % k = k+obj.k_static;
+            % Create stiffness matrix K (tridiagonal) based on k
+               K = diag(k)+diag([k(2:obj.N),0])+diag(-k(2:obj.N),1)+diag(-k(1:obj.N-1),-1);
                
                K_output = K;
                k_output = k;
         end
         
-        % State variable equation
-        function v=f(obj,t,x)
-            % Damping Matrix C 
-            [~,C] = obj.getDamping(t);
-
-            % Stiffness Matrix K
-            %[~,K] = obj.getStiffness(t);
-            [~,K] = obj.getStiffness(t);
-
-            % Return new state
-            A1 = [zeros(obj.N) eye(obj.N); -obj.M\K -obj.M\C];
-
-            %v = A1*x+[zeros(obj.N,1);f]*sin(obj.w_driving*t);
-            %f = obj.getForcing(t); 
-            f = zeros(obj.N,1);
-            v = A1*x+[zeros(obj.N,1);f];
-        end
-
         % Get energies of the system 
         function [E_kinetic_out, E_potential_out, E_total_out] = getTotalEnergy(obj,t,y)
            E_potential = zeros(length(t),1);
            E_kinetic = zeros(length(t),1);
             
-           [k,~] = obj.getStiffness(t);
+           [k,~] = obj.getActualStiffness(t);
            
            for i = 1:length(t)
                x = y(i,1:obj.N)'; % Displacements of each mass at time index i
@@ -129,10 +148,56 @@ classdef GeneralizedForcedMSD
         
         function [T,Y] = integrateStateVar(obj)
             %options = odeset('RelTol',1.e-4,'Stats','on');
-            options = odeset('Stats','off', 'RelTol', 1e-3);
+            options = odeset('RelTol', 1e-3, 'MaxStep',0.1);
+           
             [T,Y] = ode15s(@(t,y) f(obj,t,y),obj.ts,obj.y0,options);
         end
         
+                % State variable equation
+        function v=f(obj,t,y)
+            % Damping Matrix C 
+            [~,C] = obj.getDamping(t);
+
+            % Stiffness Matrix K
+            [k,K] = obj.getActualStiffness(y,t);
+            
+            % Solve for PID forcing
+            [k_desired,~] = obj.getDesiredStiffness(y,t);
+            desiredDifferentialDisplacement = obj.getStiffnessDependentDisplacement(k_desired);
+            
+            desiredDisplacement = zeros(obj.N,1);
+            
+            desiredDisplacement(1) = desiredDifferentialDisplacement(1);
+            for i = 2:length(desiredDifferentialDisplacement)
+                desiredDisplacement(i) = desiredDisplacement(i-1) + desiredDifferentialDisplacement(i);
+            end
+                
+            
+            PID_force = obj.getPIDForce(desiredDisplacement, y(1:obj.N));
+            % Return new state
+            A1 = [zeros(obj.N) eye(obj.N); -obj.M\K -obj.M\C];
+            
+            f = [1; 0; 0; 0];
+            v = A1*y+[zeros(obj.N,1);f*sin(obj.w_driving*t)];
+
+            %f = zeros(obj.N,1);
+            %f = [1000; 1000; -500; 1000]*sin(8*t);
+            %f = PID_force;
+            v = A1*y+[zeros(obj.N,1);f];
+        end
+
+        function f = getPIDForce(obj, desiredDisplacement, actualDisplacement)
+            % Rows are the displacement of each mass, columns are each
+            % time
+            error = desiredDisplacement - actualDisplacement;
+            obj.error = [obj.error error];
+            Kp = 200000;
+            f = Kp * error;
+        end
+        
+
+        
+
         % Get the time-displacement data 
         function [T,Y] = getStateVar(obj)
             [T,Y] = deal(obj.t, obj.y);
@@ -169,7 +234,7 @@ classdef GeneralizedForcedMSD
             F = zeros(length(obj.t),obj.N);
             
             for i = 1:length(obj.t)
-                [k,~] = obj.getStiffness(i);
+                [k,~] = obj.getActualStiffness(i);
                 x = obj.y(i,1:obj.N)'; % Displacements of each mass at time index i
                 x_diff = (x - [0;x(1:obj.N-1,1)])'; % Find deflection of each spring based on differences of mass coordinates
                 
