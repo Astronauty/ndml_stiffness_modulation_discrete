@@ -9,6 +9,7 @@ classdef GeneralizedForcedMSD
         w_driving % Driving frequency for forcing matrix
         A_k % Amplitude of space stiffness modulation
         k_static 
+        k_base
         k_wavenumber % Wavenumber stiffness modulation
         k_angularfreq % Angular freq stiffness modulation
         A_c % Amplitude of space damping modulation
@@ -24,7 +25,7 @@ classdef GeneralizedForcedMSD
     
     methods
         % Constructor
-        function obj = GeneralizedForcedMSD(N, d, y0, ts, B, w_driving, M, A_k, k_static, k_wavenumber, k_angularfreq, A_c, c_static, c_wavenumber, c_angularfreq) 
+        function obj = GeneralizedForcedMSD(N, d, y0, ts, B, w_driving, M, A_k, k_static, k_base, k_wavenumber, k_angularfreq, A_c, c_static, c_wavenumber, c_angularfreq) 
             obj.N = N;
             obj.d = d;
             obj.y0 = y0;
@@ -34,6 +35,7 @@ classdef GeneralizedForcedMSD
             obj.M = M;
             obj.A_k = A_k;
             obj.k_static = k_static;
+            obj.k_base = k_base
             obj.k_wavenumber = k_wavenumber;
             obj.k_angularfreq = k_angularfreq;
             obj.A_c = A_c;
@@ -92,10 +94,10 @@ classdef GeneralizedForcedMSD
 
             % Create stiffness matrix K (tridiagonal) based on k
                k = k + obj.k_static;
-               K = diag(k)+diag([k(2:obj.N),0])+diag(-k(2:obj.N),1)+diag(-k(1:obj.N-1),-1);
+               K = diag(k)+diag([k(1:obj.N)])+diag(-k(2:obj.N),1)+diag(-k(1:obj.N-1),-1);
                
                
-               K_output = K;
+               K_output = K + obj.k_base*eye(obj.N);
                k_output = k;
         end
         
@@ -134,10 +136,10 @@ classdef GeneralizedForcedMSD
             % Return new state
             A1 = [zeros(obj.N) eye(obj.N); -obj.M\K -obj.M\C];
 
-            %v = A1*x+[zeros(obj.N,1);f]*sin(obj.w_driving*t);
+%             v = A1*x+[zeros(obj.N,1);f]*sin(obj.w_driving*t);
             %f = obj.getForcing(t); 
-            f = zeros(obj.N,1);
-            v = A1*x+[zeros(obj.N,1);f];
+%             f = zeros(obj.N,1);
+            v = A1*x+[zeros(obj.N,1);obj.B];
         end
 
         % Get energies of the system 
@@ -164,9 +166,8 @@ classdef GeneralizedForcedMSD
         end
         
         function [T,Y] = integrateStateVar(obj)
-            %options = odeset('RelTol',1.e-4,'Stats','on');
-            options = odeset('Stats','on');
-            %[T,Y] = ode45(@(t,y) f(obj,t,y),obj.ts,obj.y0,options);
+            options = odeset('RelTol',1.e-3,'Stats','off');
+%             [T,Y] = ode45(@(t,y) f(obj,t,y),obj.ts,obj.y0,options);
             [T,Y] = ode15s(@(t,y) f(obj,t,y),obj.ts,obj.y0,options);
         end
         
